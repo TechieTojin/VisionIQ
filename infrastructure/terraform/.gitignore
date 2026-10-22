@@ -1,0 +1,20 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Backend configuration carries bucket/table names - never commit it.
+backend*.hcl
+
+# Local overrides and anything with real values in it.
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+
+# Build artifacts produced by archive_file.
+modules/*/.build/
+lambda/**/__pycache__/
+*.pyc

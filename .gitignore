@@ -1,0 +1,64 @@
+# ---- Python ----
+backend/.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---- Model weights (never commit; downloaded on demand) ----
+backend/models/
+*.pt
+*.onnx
+*.engine
+*.pth
+
+# ---- Local data (SQLite DB and stored images) ----
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Node / frontend ----
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+*.local
+
+# ---- Terraform ----
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan.binary
+crash.log
+crash.*.log
+# Keep .terraform.lock.hcl committed — it pins provider versions.
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# ---- Environment & secrets ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials
+aws-credentials.json
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Logs ----
+*.log

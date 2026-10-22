@@ -1,0 +1,42 @@
+# Keep the build context small and free of local state.
+#
+# Without this, `docker build ... backend` would upload the virtualenv
+# (hundreds of MB) and could bake the local SQLite database and any stored
+# images into the layer cache.
+
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local runtime state — must never enter an image.
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Weights are downloaded during the build, not copied from the host, so the
+# image is reproducible rather than dependent on a developer's machine.
+models/
+*.pt
+*.onnx
+*.engine
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Not needed at runtime
+tests/
+docs/
+*.md
+.dockerignore
+Dockerfile

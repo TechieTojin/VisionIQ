@@ -1,0 +1,21 @@
+# Core API dependencies.
+#
+# REQUIRES 64-BIT PYTHON (>= 3.10). `cryptography`, pulled in by PyJWT for
+# RS256 signature verification, publishes no 32-bit Windows wheels and fails
+# to build from source there — as does PyTorch. See docs/deployment/local.md.
+#
+# Pins are chosen to install on BOTH Python 3.10 (the local 64-bit venv) and
+# 3.11 (CI), and are the exact versions verified by the test suite.
+fastapi==0.159.1
+uvicorn==0.54.0
+pillow==12.3.0            # 13.x requires Python >= 3.11
+python-multipart==0.0.32
+pydantic==2.14.1
+
+# AWS adapters. Importing them is optional at runtime — the app degrades to
+# local SQLite + filesystem storage when AWS is not configured.
+boto3==1.43.117
+
+# JWT verification (Cognito / OIDC). The [crypto] extra pulls in
+# `cryptography`, which is required for RS256 and is 64-bit only.
+PyJWT[crypto]==2.12.1

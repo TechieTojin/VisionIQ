@@ -1,0 +1,39 @@
+# Ruff configuration for the VisionIQ backend.
+# Intentionally lenient: this is a linting safety net, not a style police force.
+
+line-length = 100
+# The real floor is 3.10: the supported venv runs 64-bit Python 3.10, so
+# 3.11-only constructs (datetime.UTC, enum.StrEnum) must not be introduced.
+target-version = "py310"
+
+exclude = [
+    ".venv",
+    "venv",
+    "models",
+    "__pycache__",
+    ".pytest_cache",
+    "build",
+    "dist",
+]
+
+[lint]
+select = [
+    "E", # pycodestyle errors
+    "F", # pyflakes
+    "I", # isort (import ordering)
+    "UP", # pyupgrade
+]
+
+ignore = [
+    "E501", # line-too-long: formatter owns line wrapping
+    "E203", # whitespace before ':' (conflicts with black-style formatting)
+    "UP007", # Optional[X] / Union[X, Y] still fine for FastAPI/pydantic signatures
+    "UP045", # X | None rewrite of Optional[X]
+]
+
+[lint.per-file-ignores]
+"tests/**/*.py" = ["F401", "F811"] # fixtures / intentional re-imports
+"__init__.py" = ["F401"] # re-exports
+
+[lint.isort]
+known-first-party = ["app"]

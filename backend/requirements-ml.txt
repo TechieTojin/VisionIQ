@@ -1,0 +1,14 @@
+# Local/containerised inference dependencies.
+#
+# REQUIRES 64-BIT PYTHON. PyTorch publishes no 32-bit Windows wheels, so these
+# cannot be installed into a 32-bit interpreter — see docs/deployment/local.md.
+#
+# torch/torchvision are installed separately from the CPU-only index to avoid
+# pulling ~2GB of CUDA libraries:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+#
+# LICENSING: ultralytics and the YOLOv8 pretrained weights are AGPL-3.0.
+# Serving them over a network obliges you to release your source under a
+# compatible licence, or to obtain an Ultralytics Enterprise Licence.
+# See docs/architecture/models.md before any commercial deployment.
+ultralytics==8.4.183
