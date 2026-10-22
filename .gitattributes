@@ -1,0 +1,39 @@
+# Normalise line endings.
+#
+# This repository is developed on Windows but built and run on Linux (the
+# GitHub Actions runners, the Fargate worker container, and Lambda). Files
+# that Linux executes or parses MUST keep LF endings: a CRLF shebang or
+# Dockerfile line can fail with confusing "not found" errors on Linux.
+
+# Default: let Git normalise text in the repo, check out native on Windows.
+* text=auto
+
+# Always LF — these are consumed by Linux tooling.
+*.sh            text eol=lf
+*.py            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.tf            text eol=lf
+*.hcl           text eol=lf
+*.json          text eol=lf
+*.toml          text eol=lf
+*.md            text eol=lf
+*.ts            text eol=lf
+*.tsx           text eol=lf
+*.css           text eol=lf
+*.html          text eol=lf
+Dockerfile      text eol=lf
+.dockerignore   text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+requirements*.txt text eol=lf
+
+# Binary — never touch.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.svg  text eol=lf
+*.pt   binary
+*.onnx binary
+*.ico  binary
