@@ -48,7 +48,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The hosted runner has ~14 GB of disk; a torch image plus the build
       # cache can exhaust it. Reclaim the preinstalled toolchains we do not
