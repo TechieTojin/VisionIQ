@@ -229,15 +229,47 @@
 .box {
   pointer-events: auto;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition:
+    opacity 0.12s ease,
+    filter 0.12s ease;
 }
 
+/* Keyboard focus must be obvious against a photograph of any colour, so the
+   ring is drawn on the box itself rather than relying on the default
+   outline, which SVG renders inconsistently across browsers. */
 .box:focus-visible {
-  outline: 2px solid #fff;
+  outline: none;
 }
 
+.box:focus-visible rect,
+.box--active rect {
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+}
+
+.box:focus-visible rect {
+  stroke-dasharray: 6 3;
+}
+
+/* Fade the rest when one detection is pinned, so it stands out without
+   hiding its context. */
 .box--dim {
-  opacity: 0.3;
+  opacity: 0.28;
+}
+
+.box--active {
+  opacity: 1;
+}
+
+/* Labels never intercept pointer events: they would otherwise block the
+   box underneath and make small detections unclickable. */
+.box__label {
+  pointer-events: none;
+}
+
+.box__label text {
+  paint-order: stroke;
+  stroke: rgba(11, 15, 26, 0.25);
+  stroke-width: 0.5px;
 }
 
 /* ---- Controls ---- */

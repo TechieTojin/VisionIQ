@@ -58,6 +58,9 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
 
   // Detection view controls
   const [showBoxes, setShowBoxes] = useState(true)
+  // Labels off by default: a dense shelf yields dozens of them, and drawing
+  // every one at once hides the image they annotate.
+  const [showLabels, setShowLabels] = useState(false)
   const [minConfidence, setMinConfidence] = useState(0)
   const [selectedId, setSelectedId] = useState<number | null>(null)
 
@@ -431,6 +434,7 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
                     detections={visibleDetections}
                     colors={colors}
                     showBoxes={showBoxes}
+                    showLabels={showLabels}
                     selectedId={selectedId}
                     onSelect={setSelectedId}
                   />
@@ -477,6 +481,8 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
                   onMinConfidenceChange={setMinConfidence}
                   showBoxes={showBoxes}
                   onToggleBoxes={setShowBoxes}
+                  showLabels={showLabels}
+                  onToggleLabels={setShowLabels}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                 />

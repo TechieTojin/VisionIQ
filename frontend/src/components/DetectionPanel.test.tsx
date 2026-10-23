@@ -39,6 +39,8 @@ function renderPanel(props: Partial<Parameters<typeof DetectionPanel>[0]> = {}) 
       onMinConfidenceChange={() => {}}
       showBoxes
       onToggleBoxes={() => {}}
+      showLabels={false}
+      onToggleLabels={() => {}}
       selectedId={null}
       onSelect={() => {}}
       {...props}
@@ -101,11 +103,43 @@ describe('DetectionPanel', () => {
     expect(onChange).toHaveBeenCalledWith(0.6)
   })
 
+  it('offers an all-labels toggle, off by default', () => {
+    renderPanel()
+    const toggle = screen.getByText('All labels')
+      .closest('label')!
+      .querySelector('input')!
+    expect(toggle).not.toBeChecked()
+  })
+
+  it('emits label toggle changes', async () => {
+    const onToggleLabels = vi.fn()
+    renderPanel({ onToggleLabels })
+
+    await userEvent.click(
+      screen.getByText('All labels').closest('label')!.querySelector('input')!,
+    )
+    expect(onToggleLabels).toHaveBeenCalledWith(true)
+  })
+
+  it('disables the label toggle when boxes are hidden', () => {
+    // Labels without boxes would be meaningless floating chips.
+    renderPanel({ showBoxes: false })
+    expect(
+      screen.getByText('All labels').closest('label')!.querySelector('input')!,
+    ).toBeDisabled()
+  })
+
   it('toggles bounding boxes', async () => {
     const onToggle = vi.fn()
     renderPanel({ onToggleBoxes: onToggle })
 
-    await userEvent.click(screen.getByRole('checkbox'))
+    // There are two checkboxes now; target the boxes one by its label.
+    await userEvent.click(
+      screen
+        .getByText('Bounding boxes')
+        .closest('label')!
+        .querySelector('input')!,
+    )
     expect(onToggle).toHaveBeenCalledWith(false)
   })
 
