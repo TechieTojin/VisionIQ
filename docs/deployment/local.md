@@ -33,7 +33,7 @@ Without `cryptography` the entire auth module is unimportable, so the whole
 
 | Environment | Result |
 |---|---|
-| `.venv` (3.10, 64-bit) | **231 passed** |
+| `.venv` (3.10, 64-bit) | **232 passed** |
 | Clean venv, `requirements-dev.txt` only (no torch) | **164 passed** |
 | Former 32-bit venv (3.11), before removal | **124 passed, 1 skipped** (auth module skipped wholesale) |
 
@@ -163,7 +163,7 @@ Other scripts:
 ```powershell
 npm run lint
 npm run typecheck
-npm test           # 197 passed across 12 files
+npm test           # 219 passed across 13 files
 npm run build      # tsc -b && vite build
 ```
 
@@ -326,7 +326,7 @@ downloads weights.
 cd backend
 .venv\Scripts\Activate.ps1
 
-python -m pytest                       # whole suite — 231 passed
+python -m pytest                       # whole suite — 232 passed
 python -m pytest -q --cov=app --cov-report=term-missing
 python -m pytest tests\test_auth.py -v # the auth suite; SKIPS wholesale on 32-bit
 python -m ruff check . --config ruff.toml

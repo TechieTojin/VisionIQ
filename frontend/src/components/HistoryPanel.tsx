@@ -9,6 +9,12 @@ interface HistoryPanelProps {
   compareIds: string[]
   comparison: ComparisonResult | null
   hasMore: boolean
+  /**
+   * Demo mode: there is no backend, so comparison and deletion cannot work.
+   * The controls are hidden rather than left to fail — an affordance that
+   * does nothing is worse than no affordance.
+   */
+  readOnly?: boolean
   onSelect: (id: string) => void
   onDelete: (id: string) => void
   onToggleCompare: (id: string) => void
@@ -33,6 +39,7 @@ export function HistoryPanel({
   compareIds,
   comparison,
   hasMore,
+  readOnly = false,
   onSelect,
   onDelete,
   onToggleCompare,
@@ -131,28 +138,30 @@ export function HistoryPanel({
                   </span>
                 )}
               </button>
-              <div className="history__actions">
-                <button
-                  type="button"
-                  className={`chip${
-                    compareIds.includes(item.analysis_id) ? ' chip--on' : ''
-                  }`}
-                  onClick={() => onToggleCompare(item.analysis_id)}
-                  title="Select for comparison"
-                  aria-pressed={compareIds.includes(item.analysis_id)}
-                >
-                  ⇄
-                </button>
-                <button
-                  type="button"
-                  className="chip chip--danger"
-                  onClick={() => onDelete(item.analysis_id)}
-                  title="Delete this analysis"
-                  aria-label={`Delete ${item.filename}`}
-                >
-                  ×
-                </button>
-              </div>
+              {!readOnly && (
+                <div className="history__actions">
+                  <button
+                    type="button"
+                    className={`chip${
+                      compareIds.includes(item.analysis_id) ? ' chip--on' : ''
+                    }`}
+                    onClick={() => onToggleCompare(item.analysis_id)}
+                    title="Select for comparison"
+                    aria-pressed={compareIds.includes(item.analysis_id)}
+                  >
+                    ⇄
+                  </button>
+                  <button
+                    type="button"
+                    className="chip chip--danger"
+                    onClick={() => onDelete(item.analysis_id)}
+                    title="Delete this analysis"
+                    aria-label={`Delete ${item.filename}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
             </li>
           ))}
         </ul>

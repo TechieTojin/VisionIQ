@@ -13,7 +13,13 @@
  * so only the *choreography* differs, never the parsing.
  */
 
-export type ApiMode = 'local' | 'cloud'
+/**
+ * `demo` is a third transport: there is no backend at all. It replays
+ * pre-recorded results captured from a real local YOLO run, and the UI
+ * labels them as such. It exists so the project can be shown publicly at
+ * zero hosting cost — no free host can run CPU YOLO inference reliably.
+ */
+export type ApiMode = 'local' | 'cloud' | 'demo'
 
 export interface ApiConfig {
   mode: ApiMode
@@ -35,7 +41,8 @@ export function resolveApiConfig(
   env: ImportMetaEnv = import.meta.env,
 ): ApiConfig {
   const rawMode = (env.VITE_API_MODE ?? 'local').trim().toLowerCase()
-  const mode: ApiMode = rawMode === 'cloud' ? 'cloud' : 'local'
+  const mode: ApiMode =
+    rawMode === 'cloud' ? 'cloud' : rawMode === 'demo' ? 'demo' : 'local'
 
   return {
     mode,

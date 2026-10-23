@@ -17,7 +17,7 @@
 
 import { ApiError, detectImage, request } from './client'
 import { getAccessToken } from './auth'
-import { apiUrl, resolveApiConfig, type ApiConfig } from './config'
+import { apiUrl, resolveApiConfig, type ApiConfig, type ApiMode } from './config'
 import type { AnalysisRecord, JobStatus } from '../types'
 
 /** Terminal states: polling stops here. */
@@ -47,7 +47,7 @@ export interface AnalysisProgress {
 }
 
 export interface AnalysisClient {
-  readonly mode: 'local' | 'cloud'
+  readonly mode: ApiMode
   analyze(
     file: File,
     onProgress?: (progress: AnalysisProgress) => void,
@@ -275,14 +275,39 @@ class CloudAnalysisClient implements AnalysisClient {
 let cached: AnalysisClient | null = null
 let cachedMode: string | null = null
 
+/** Registered by the demo module so this factory need not import it. */
+let demoClientFactory: (() => AnalysisClient) | null = null
+
+export function registerDemoClientFactory(factory: () => AnalysisClient): void {
+  demoClientFactory = factory
+}
+
 export function getAnalysisClient(config?: ApiConfig): AnalysisClient {
   const resolved = config ?? resolveApiConfig()
   if (cached && cachedMode === resolved.mode) return cached
 
-  cached =
-    resolved.mode === 'cloud'
-      ? new CloudAnalysisClient(resolved)
-      : new LocalAnalysisClient()
+  if (resolved.mode === 'demo') {
+    // Defence in depth. The UI already removes the file input in demo mode,
+    // so this path should be unreachable — but if it ever is reached, it
+    // must NOT fall through to the local client, which would POST a user's
+    // image to an endpoint that does not exist on a static deployment.
+    cached = demoClientFactory
+      ? demoClientFactory()
+      : {
+          mode: 'demo' as const,
+          analyze: () => {
+            throw new ApiError(
+              'This is a demo deployment with no inference backend.',
+              'demo_mode',
+            )
+          },
+        }
+  } else if (resolved.mode === 'cloud') {
+    cached = new CloudAnalysisClient(resolved)
+  } else {
+    cached = new LocalAnalysisClient()
+  }
+
   cachedMode = resolved.mode
   return cached
 }

@@ -1,5 +1,25 @@
 # VisionIQ — Terraform
 
+> ## ⚠ Architecture demonstration — deliberately NOT deployed
+>
+> **Do not run `terraform apply`.** This project runs on a strict **$0
+> budget**. There is no AWS account, nothing here has ever been applied, and
+> applying it **would create billing-capable resources** — see the cost table
+> below (≈ $1.50/month for dev, and some resources bill while completely
+> idle).
+>
+> This stack exists to show the architecture and to be verified statically:
+> `terraform fmt` and `terraform validate` pass, and the Lambda handler is
+> covered by cross-component contract tests in `backend/tests/`. That is the
+> intended extent of its use.
+>
+> The public demo is the React frontend on Vercel Hobby in demo mode, which
+> costs nothing — see [`../../docs/deployment/free-hosting.md`](../../docs/deployment/free-hosting.md).
+>
+> If you ever do intend to deploy, read
+> [`../../docs/deployment/aws-account-setup.md`](../../docs/deployment/aws-account-setup.md)
+> first and set up billing alarms **before** the first apply.
+
 Infrastructure for the VisionIQ async shelf-analysis pipeline.
 
 ```

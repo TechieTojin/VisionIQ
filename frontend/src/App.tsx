@@ -15,6 +15,15 @@ import {
   validateFile,
 } from './api/client'
 import { getAnalysisClient, type AnalysisProgress } from './api/analysisClient'
+import { resolveApiConfig } from './api/config'
+import { DemoAnalysisClient } from './demo/demoClient'
+import {
+  DEMO_MODEL,
+  DEMO_SAMPLES,
+  demoHistory,
+  type DemoSample,
+} from './demo/demoData'
+import { DemoBanner, SamplePicker } from './components/DemoPanel'
 import type {
   AnalysisRecord,
   AnalysisSummary,
@@ -35,6 +44,10 @@ interface DashboardProps {
 }
 
 function App({ user, mode, onLogout }: DashboardProps = {}) {
+  // Demo mode replays recorded analyses; there is no backend to call.
+  const apiConfig = useMemo(() => resolveApiConfig(), [])
+  const isDemo = apiConfig.mode === 'demo'
+  const demoClient = useMemo(() => new DemoAnalysisClient(), [])
   const [status, setStatus] = useState<Status>('idle')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
@@ -73,16 +86,30 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
   }, [])
 
   useEffect(() => {
+    // Demo mode has no backend to ask; the banner states the model instead.
+    if (isDemo) return
     getSystemStatus()
       .then(setSystem)
       .catch(() => setSystem(null))
-  }, [])
+  }, [isDemo])
 
   // -- history -----------------------------------------------------------
 
   const loadHistory = useCallback(
     async (opts: { reset?: boolean; term?: string } = {}) => {
       const term = opts.term ?? search
+
+      if (isDemo) {
+        // No backend to query: the "history" is the bundled samples.
+        const rows = demoHistory().filter((row) =>
+          term ? row.filename.toLowerCase().includes(term.toLowerCase()) : true,
+        )
+        setHistory(rows)
+        setCursor(null)
+        setHasMore(false)
+        return
+      }
+
       setHistoryLoading(true)
       try {
         const page = await listAnalyses({
@@ -99,7 +126,7 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
         setHistoryLoading(false)
       }
     },
-    [cursor, search],
+    [cursor, search, isDemo],
   )
 
   // Loads the first page on mount and re-queries as the search term changes.
@@ -165,8 +192,43 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
     [loadHistory, setPreview],
   )
 
+  const handleDemoPick = useCallback(
+    async (sample: DemoSample) => {
+      setError(null)
+      setProgress(100)
+      setStage('processing')
+      setStatus('uploading')
+      setSelectedId(null)
+      // The sample's own image, served statically - not an object URL.
+      setPreview(sample.image_url)
+      try {
+        const result = await demoClient.replay(sample.id, (p) => {
+          if (p.percent !== undefined) setProgress(p.percent)
+          setStage(p.stage)
+        })
+        setRecord(result)
+        setStatus('done')
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Could not load sample.')
+        setStatus('error')
+      }
+    },
+    [demoClient, setPreview],
+  )
+
   const openAnalysis = useCallback(
     async (id: string) => {
+      if (isDemo) {
+        const sample = DEMO_SAMPLES.find((x) => x.record.analysis_id === id)
+        if (sample) {
+          setRecord(sample.record)
+          setPreview(sample.image_url)
+          setStatus('done')
+          setError(null)
+          setSelectedId(null)
+        }
+        return
+      }
       try {
         const full = await getAnalysis(id)
         setRecord(full)
@@ -180,7 +242,7 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
         setStatus('error')
       }
     },
-    [setPreview],
+    [setPreview, isDemo],
   )
 
   const removeAnalysis = useCallback(
@@ -212,6 +274,8 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
   // Fetch a comparison once exactly two scans are selected.
   useEffect(() => {
     if (compareIds.length !== 2) return
+    // No backend in demo mode, and the compare controls are hidden there.
+    if (isDemo) return
     let cancelled = false
     compareAnalyses(compareIds[0], compareIds[1])
       .then((res) => {
@@ -223,7 +287,7 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
     return () => {
       cancelled = true
     }
-  }, [compareIds])
+  }, [compareIds, isDemo])
 
   // -- derived -----------------------------------------------------------
 
@@ -303,13 +367,23 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
         </p>
       )}
 
+      {isDemo && <DemoBanner modelName={DEMO_MODEL?.name} />}
+
       <main className="layout">
         {/* ---- Workspace ---- */}
         <section className="column column--main">
-          <Dropzone
-            disabled={status === 'uploading'}
-            onFileSelected={handleFile}
-          />
+          {isDemo ? (
+            <SamplePicker
+              activeId={record?.analysis_id ?? null}
+              busy={status === 'uploading'}
+              onPick={handleDemoPick}
+            />
+          ) : (
+            <Dropzone
+              disabled={status === 'uploading'}
+              onFileSelected={handleFile}
+            />
+          )}
 
           {status === 'uploading' && (
             <div className="panel">
@@ -480,6 +554,7 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
             compareIds={compareIds}
             comparison={comparison}
             hasMore={hasMore}
+            readOnly={isDemo}
             onSelect={openAnalysis}
             onDelete={removeAnalysis}
             onToggleCompare={toggleCompare}
