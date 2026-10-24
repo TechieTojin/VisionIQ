@@ -11,6 +11,10 @@ uvicorn==0.54.0
 pillow==12.3.0            # 13.x requires Python >= 3.11
 python-multipart==0.0.32
 pydantic==2.14.1
+# Workbench statistics (drift PSI/KS, evaluation metrics, image quality).
+# Imported by the API itself, not only by inference, so it is a core
+# dependency; 2.2.x supports Python 3.10 through 3.13.
+numpy==2.2.6
 
 # AWS adapters. Importing them is optional at runtime — the app degrades to
 # local SQLite + filesystem storage when AWS is not configured.
