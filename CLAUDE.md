@@ -67,7 +67,17 @@ VisionIQ/
 │   └── src/
 │       ├── main.tsx           Wraps the app in <AuthProvider>
 │       ├── AuthenticatedApp.tsx  Gates the dashboard behind <AuthGate>
-│       ├── App.tsx            Dashboard; optional user/mode/onLogout props
+│       ├── App.tsx            App shell + hash router; optional user/mode/onLogout props
+│       ├── pages/             Dashboard, Analyze, Compare, Timeline, Reports
+│       ├── data/              ScanSource (local | cloud | demo) + ScanDataProvider:
+│       │                      history fetched once, shared by every page
+│       ├── lib/
+│       │   ├── analytics.ts   THE single source of every metric (KPIs, trends,
+│       │   │                  alerts, compareRecords = port of backend compare)
+│       │   ├── zones.ts       Zone geometry; box CENTRE -> first zone, no double count
+│       │   ├── heatmap.ts     Deterministic detection-density grid
+│       │   ├── router.ts      Dependency-free hash router
+│       │   └── pdf/           Hand-written PDF writer + inspection report (no deps)
 │       ├── auth/              Cognito hosted-UI sign-in (code flow + PKCE)
 │       │   ├── config.ts      resolveAuthConfig: local | cognito | misconfigured
 │       │   ├── pkce.ts        S256 verifier/challenge/state, sessionStorage stash
@@ -105,7 +115,7 @@ real inference. The former 32-bit Python 3.11 venv has been **deleted**.
 *nor* `cryptography`: neither publishes 32-bit Windows wheels, and a source
 build of `cryptography` dies in the Rust linker. PyJWT's RS256 path needs
 `cryptography`, so on 32-bit the entire auth test module skipped
-(`124 passed, 1 skipped` versus **232 passed** on 64-bit today).
+(`124 passed, 1 skipped` versus **322 passed** on 64-bit today).
 
 The floor is Python **3.10**, so do not introduce 3.11-only constructs
 (`datetime.UTC`, `enum.StrEnum`). `ruff.toml` pins `target-version = "py310"` to
@@ -346,7 +356,7 @@ cd backend
 .venv\Scripts\activate
 python -m pip install -r requirements-dev.txt -r requirements-ml.txt
 uvicorn app.main:app --reload --port 8080     # port 8000 fails on this machine
-python -m pytest -q                            # 232 passed
+python -m pytest -q                            # 322 passed
 python -m pytest tests\test_auth.py -q         # auth suite specifically
 python -m ruff check . --config ruff.toml
 python scripts\smoke_inference.py path\to\shelf.jpg
@@ -362,7 +372,7 @@ cd frontend
 npm install
 cp .env.example .env.local     # optional: defaults to VITE_AUTH_MODE=local in dev
 npm run dev        # :5175, proxies /api -> 127.0.0.1:8080
-npm run lint && npm run typecheck && npm test && npm run build   # 219 passed (13 files)
+npm run lint && npm run typecheck && npm test && npm run build   # 457 passed (25 files)
 ```
 
 The frontend defaults to `VITE_AUTH_MODE=local` in dev, which pairs with the

@@ -100,18 +100,30 @@ def isolated_settings(monkeypatch, tmp_path):
     monkeypatch.setenv("VISIONIQ_SQLITE_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("VISIONIQ_STORAGE_DIR", str(tmp_path / "images"))
     monkeypatch.setenv("VISIONIQ_DETECTION_PROVIDER", "null")
+    # The workbench store too: /detect's post-detect hook writes quality and
+    # alerts, and no test may ever touch the real backend/data directory.
+    monkeypatch.setenv("VISIONIQ_WORKBENCH_DB", str(tmp_path / "workbench.db"))
+    monkeypatch.setenv("VISIONIQ_WORKBENCH_DIR", str(tmp_path / "workbench"))
 
     from app.repositories.factory import reset_repository_cache
     from app.storage.factory import reset_storage_cache
+    from app.workbench.store import reset_store_cache
 
     reset_repository_cache()
     reset_storage_cache()
+    reset_store_cache()
+    # The rate limiter is process-wide; give each test a fresh window so the
+    # suite's request count never decides an unrelated test's outcome.
+    from app import security
+
+    monkeypatch.setattr(security, "_limiter", None)
     settings = get_settings()
     yield settings
 
     get_settings.cache_clear()
     reset_repository_cache()
     reset_storage_cache()
+    reset_store_cache()
 
 
 @pytest.fixture
@@ -129,3 +141,132 @@ def client(isolated_settings):
 def temp_dir():
     with tempfile.TemporaryDirectory() as d:
         yield d
+
+
+# ---------------------------------------------------------------------------
+# Workbench fixtures
+# ---------------------------------------------------------------------------
+
+
+class _FakeTensor:
+    def __init__(self, values):
+        self._values = values
+
+    def tolist(self):
+        return list(self._values)
+
+    def item(self):
+        return self._values[0]
+
+    def __getitem__(self, i):
+        return _FakeTensor(self._values[i]) if isinstance(self._values[i], list) else _FakeTensor([self._values[i]])
+
+
+class _FakeBox:
+    def __init__(self, xyxy, cls, conf):
+        self.xyxy = [_FakeTensor(list(xyxy))]
+        self.cls = [_FakeTensor([cls])]
+        self.conf = [_FakeTensor([conf])]
+
+
+class _FakeBoxes:
+    def __init__(self, boxes):
+        self._boxes = boxes
+
+    def __len__(self):
+        return len(self._boxes)
+
+    def __getitem__(self, i):
+        return self._boxes[i]
+
+
+class _FakeResult:
+    def __init__(self, boxes, names):
+        self.boxes = _FakeBoxes(boxes)
+        self.names = names
+
+
+class FakeYolo:
+    """Stands in for an Ultralytics model: same predict() surface, no weights.
+
+    `outputs` maps image width -> list of (label, conf, (x1,y1,x2,y2)), so a
+    test controls exactly what each image "predicts".
+    """
+
+    def __init__(self, names: dict[int, str], outputs: dict | None = None, default=None):
+        self.names = names
+        self.outputs = outputs or {}
+        self.default = default or []
+        self.calls = []
+
+    def predict(self, source, conf, max_det, imgsz, device, verbose):
+        self.calls.append({"size": source.size, "conf": conf, "imgsz": imgsz})
+        spec = self.outputs.get(source.size[0], self.default)
+        ids = {v: k for k, v in self.names.items()}
+        boxes = [_FakeBox(box, ids[label], c) for label, c, box in spec if c >= conf][:max_det]
+        return [_FakeResult(boxes, self.names)]
+
+
+@pytest.fixture
+def wb(isolated_settings, monkeypatch, tmp_path):
+    """Isolated workbench store/dirs plus a fake model loader."""
+    monkeypatch.setenv("VISIONIQ_WORKBENCH_DB", str(tmp_path / "workbench.db"))
+    monkeypatch.setenv("VISIONIQ_WORKBENCH_DIR", str(tmp_path / "workbench"))
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "yolov8n.pt").write_bytes(b"fake weights")
+    monkeypatch.setenv("VISIONIQ_MODEL_DIR", str(models_dir))
+    get_settings.cache_clear()
+
+    from app.workbench import jobs, models
+    from app.workbench.store import reset_store_cache
+
+    reset_store_cache()
+    fake = FakeYolo({0: "bottle", 1: "cup", 2: "person"})
+    monkeypatch.setattr(models, "_load_yolo", lambda path: fake)
+    monkeypatch.setattr(models, "_production_instance", lambda path: None)
+    models._extra.clear()
+    yield {"settings": get_settings(), "model": fake, "models_dir": models_dir, "tmp": tmp_path}
+    # A training test's subprocess may still be exiting; never leak a busy slot.
+    jobs.wait_idle(120)
+    models._extra.clear()
+    reset_store_cache()
+    get_settings.cache_clear()
+
+
+def seed_scan(owner_id="local", analysis_id=None, detections=None, size=(320, 240), color=(90, 120, 200),
+              when=None, status="completed", inference_status="ok", image_bytes=None, model_name="yolov8n.pt",
+              threshold=0.25, filename=None):
+    """Persist a real record + stored image through the normal repository/storage."""
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from app.repositories import get_repository
+    from app.schemas.analysis import AnalysisRecord, JobStatus
+    from app.schemas.detection import DetectionResult, InferenceStatus
+    from app.services.image_analyzer import analyze_image
+    from app.storage import get_storage
+    from app.storage.base import build_key
+
+    analysis_id = analysis_id or uuid4().hex
+    data = image_bytes or make_image_bytes("PNG", size, color)
+    meta = analyze_image(filename or f"{analysis_id}.png", data)
+    dets = detections or []
+    key = get_storage().put(build_key(owner_id, analysis_id, meta.format), data, meta.content_type)
+    record = AnalysisRecord(
+        analysis_id=analysis_id,
+        owner_id=owner_id,
+        created_at=when or datetime.now(timezone.utc),
+        status=JobStatus(status),
+        image=meta,
+        image_key=key,
+        detection=DetectionResult(
+            analysis_id=analysis_id, image_width=meta.width, image_height=meta.height,
+            model=ModelInfo(provider="yolo", name=model_name, version="8.4", taxonomy="COCO-80", device="cpu"),
+            detections=dets, detection_count=len(dets), processing_ms=50.0,
+            status=InferenceStatus(inference_status), confidence_threshold=threshold, warnings=[],
+        ),
+        error="boom" if status == "failed" else None,
+    )
+    get_repository().create(record)
+    return record

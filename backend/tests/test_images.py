@@ -75,3 +75,18 @@ def test_rejects_oversized_file():
 def test_health_and_root():
     assert client.get("/health").json() == {"status": "healthy"}
     assert client.get("/").json()["version"].startswith("2.")
+
+
+def test_rejects_truncated_jpeg_cleanly(client):
+    """BUG-06 regression: verify() passes a truncated JPEG; validation must still reject it."""
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (400, 300), (10, 120, 200)).save(buf, format="JPEG", quality=95)
+    data = buf.getvalue()[: len(buf.getvalue()) // 2]
+    for path in ("/api/images/analyze", "/api/images/detect", "/api/quality/inspect"):
+        r = client.post(path, files={"file": ("cut.jpg", data, "image/jpeg")})
+        assert r.status_code == 400, (path, r.status_code)
+        assert r.json()["error"] == "invalid_image"

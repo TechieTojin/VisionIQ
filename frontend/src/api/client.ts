@@ -14,10 +14,13 @@ const MAX_BYTES = 10 * 1024 * 1024
 
 export class ApiError extends Error {
   readonly code: string
-  constructor(message: string, code = 'error') {
+  /** The server's machine-readable `error` field, when it sent one. */
+  readonly reason: string | null
+  constructor(message: string, code = 'error', reason: string | null = null) {
     super(message)
     this.name = 'ApiError'
     this.code = code
+    this.reason = reason
   }
 }
 
@@ -65,6 +68,15 @@ function extractError(body: unknown, fallback: string): string {
   if (body && typeof body === 'object') {
     const b = body as Partial<ErrorResponse> & { detail?: unknown }
     if (typeof b.detail === 'string') return b.detail
+    // FastAPI request validation: [{loc, msg, ...}, ...]
+    const detail: unknown = b.detail
+    if (Array.isArray(detail) && detail.length) {
+      const first = detail[0] as { msg?: unknown; loc?: unknown }
+      if (typeof first?.msg === 'string') {
+        const field = Array.isArray(first.loc) ? first.loc.filter((p) => p !== 'body').join('.') : ''
+        return field ? `${field}: ${first.msg}` : first.msg
+      }
+    }
     if (b.detail && typeof b.detail === 'object') {
       const nested = b.detail as Partial<ErrorResponse>
       if (typeof nested.detail === 'string') return nested.detail
@@ -112,9 +124,14 @@ export async function request<T>(
 
   if (!response.ok) {
     notifyUnauthorized(response.status)
+    const reason =
+      body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
+        ? (body as { error: string }).error
+        : null
     throw new ApiError(
       extractError(body, `Request failed (${response.status}).`),
       String(response.status),
+      reason,
     )
   }
   return body as T
@@ -213,4 +230,30 @@ export function compareAnalyses(
 
 export function getSystemStatus(): Promise<SystemStatus> {
   return request<SystemStatus>('/api/system/status')
+}
+
+/**
+ * Fetch a binary resource (a stored scan image) as a Blob.
+ *
+ * An `<img src>` cannot carry an Authorization header, so images are fetched
+ * here with the same bearer token as every other request and handed to the
+ * page as an object URL. Returns null for a 404 — a missing image is an
+ * expected state (deleted file, cloud mode), not an error.
+ */
+export async function requestBlob(
+  path: string,
+  config?: ApiConfig,
+): Promise<Blob | null> {
+  let response: Response
+  try {
+    response = await fetch(apiUrl(path, config), { headers: await authHeaders() })
+  } catch {
+    throw new ApiError('Network error while loading the image.', 'network')
+  }
+  if (response.status === 404) return null
+  if (!response.ok) {
+    notifyUnauthorized(response.status)
+    throw new ApiError(`Could not load the image (${response.status}).`, String(response.status))
+  }
+  return response.blob()
 }

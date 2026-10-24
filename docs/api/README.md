@@ -5,8 +5,9 @@ Local base URL: `http://127.0.0.1:8080`. The frontend calls absolute `/api/...`
 paths, prefixed with `VITE_API_BASE_URL` when one is set; with none set they are
 same-origin and Vite proxies them (see `docs/deployment/local.md`).
 
-- Allowed methods (CORS): `GET, POST, DELETE, OPTIONS`
-- Allowed headers (CORS): `Content-Type`, `X-Correlation-Id`, `X-VisionIQ-User`
+- Allowed methods (CORS): `GET, POST, PUT, PATCH, DELETE, OPTIONS`
+- Allowed headers (CORS): `Content-Type`, `X-Correlation-Id`, `Authorization`
+  (there is deliberately no header through which a client can assert an owner)
 - Every response carries `x-correlation-id` (echoes your request header, or a
   fresh 16-hex id).
 - Interactive docs: `/docs` and `/openapi.json` (FastAPI defaults).
@@ -379,6 +380,30 @@ Retrieve one full analysis, scoped to the caller's tenant. Not rate limited.
 
 **Errors:** `404 not_found` (nested envelope). Another tenant's analysis also
 returns `404`, not `403` — existence is not disclosed across tenants.
+
+---
+
+## `GET /api/analyses/{analysis_id}/image`
+
+The original uploaded image bytes for one of the caller's analyses. Used by the
+dashboard's scan view, Compare page and PDF reports. Not rate limited.
+
+**200** — raw bytes. `Content-Type` is the record's validated type
+(`image/jpeg`, `image/png` or `image/webp`; anything else is served as
+`application/octet-stream`). Headers: `Cache-Control: private, max-age=3600`,
+`X-Content-Type-Options: nosniff`.
+
+The record is looked up under the caller's tenant first, and its stored key is
+checked with `assert_owned` before storage is read, so a key pointing outside
+the caller's prefix is refused.
+
+**Errors:** `404 not_found` (no such analysis for this tenant — including
+another tenant's), `404 image_unavailable` (record has no stored image, the
+file is gone, or the key failed the ownership check).
+
+Local (FastAPI) only. The Lambda control plane has no equivalent: in cloud
+mode images stay in the private bucket and the dashboard reports them as
+unavailable rather than guessing a URL.
 
 ---
 
@@ -1001,3 +1026,54 @@ the body, not as an HTTP error.
 | `InsightSource` | `rules`, `bedrock`, `unavailable` |
 | `Insight.confidence` | `informational`, `advisory` (free-form string field) |
 | Accepted formats | `JPEG` → `image/jpeg`, `PNG` → `image/png`, `WEBP` → `image/webp` |
+
+---
+
+# Workbench API (local only)
+
+`backend/app/routes/workbench.py`, prefix `/api`. These endpoints back the
+Retail Intelligence and ML-engineering pages (alerts, quality, annotation,
+datasets, benchmark, evaluation, drift, training). They exist **only in the
+FastAPI backend** — the Lambda control plane has no equivalent, and the
+frontend marks these pages local-only in cloud and demo modes.
+
+Every handler takes the owner id from verified claims (`get_owner_id`) and
+every read and write is scoped by it; another tenant's id is a `404`. Errors
+use the standard envelope `{"success": false, "error": "<code>", "detail": "…"}`.
+Heavy jobs share one slot: starting a second benchmark, evaluation or training
+run while one is active returns `409 busy`. Endpoints marked *(rl)* are rate
+limited.
+
+The request and response models live next to each service in
+`backend/app/workbench/`; `/docs` on a running backend shows them all.
+
+| Area | Method & path | Purpose |
+|---|---|---|
+| Status | `GET /api/workbench/status` | Availability, active heavy job, free RAM, runtime (torch / ultralytics / device) |
+| Quality | `POST /api/quality/inspect` *(rl)* | Inspect an uploaded image without storing it or creating a scan |
+| | `GET /api/quality` · `GET /api/quality/{analysis_id}` | Stored quality reports (`?recompute=true` to recompute one) |
+| | `POST /api/quality/backfill` *(rl)* | Compute quality for scans that have none, bounded by `limit` |
+| Alerts | `GET` / `POST /api/alerts/rules` · `PUT` / `DELETE /api/alerts/rules/{rule_id}` | Manage alert rules |
+| | `POST /api/alerts/evaluate` *(rl)* | Evaluate every enabled rule against stored scans (idempotent) |
+| | `GET /api/alerts` · `GET /api/alerts/summary` · `PATCH /api/alerts/{alert_id}` | List, summarise, acknowledge / resolve / annotate events |
+| Annotations | `GET /api/annotations` · `GET /api/annotations/{analysis_id}` | Overview of every scan's review state; one document |
+| | `POST /api/annotations/{analysis_id}/import` · `…/empty` | Start from a copy of model predictions (min confidence), or empty |
+| | `PUT /api/annotations/{analysis_id}` | Save boxes with `base_revision`; a stale revision is `409` |
+| | `DELETE /api/annotations/{analysis_id}` · `GET …/yolo` | Discard; export YOLO-format labels |
+| | `GET` / `POST /api/annotations/labels` | Custom label vocabulary |
+| Datasets | `GET` / `POST /api/datasets` · `GET` / `PUT` / `DELETE /api/datasets/{dataset_id}` | Manage datasets |
+| | `POST /api/datasets/{dataset_id}/items` · `DELETE …/items/{analysis_id}` | Add / remove scans |
+| | `POST /api/datasets/{dataset_id}/versions` · `GET …/versions/{version}` | Freeze an immutable version with a seeded split; read one |
+| | `GET /api/datasets/{dataset_id}/versions/{version}/export` | Download a version as a YOLO-format zip |
+| | `GET /api/datasets/versions` | Every version across datasets |
+| Models | `GET /api/models` · `POST /api/models/predict/{analysis_id}?model_id=` *(rl)* · `DELETE /api/models/{model_id}` | Local registry (`pretrained:<file>.pt`, `trained:<run>`); predictions never overwrite the scan |
+| Jobs | `GET /api/workbench/jobs` · `GET …/{job_id}` · `POST …/{job_id}/cancel` | Heavy-job state, progress and cancellation |
+| Benchmark | `POST /api/benchmarks` *(rl, 202)* · `GET /api/benchmarks` · `GET` / `DELETE /api/benchmarks/{run_id}` | Measured latency and outputs per configuration |
+| Evaluation | `POST /api/evaluations/preflight` · `POST /api/evaluations` *(rl, 202)* | Check, then score a model against a frozen version's reviewed labels |
+| | `GET /api/evaluations` · `GET` / `DELETE /api/evaluations/{run_id}` | Results: mAP, P/R/F1, confusion matrix, bias flags |
+| Drift | `POST /api/drift/analyze` · `GET /api/drift/presets` | PSI / KS comparison between two time windows |
+| Training | `POST /api/training/plan` | Readiness check and resource estimate — starts nothing |
+| | `POST /api/training` *(rl, 202)* | Start a run; requires `confirm` **and** `acknowledge_resources` |
+| | `GET /api/training` · `GET /api/training/{run_id}` · `GET …/config` | Runs, per-epoch metrics, the exact config used |
+| | `POST /api/training/{run_id}/register` | Register a finished run as a local model (never the production detector) |
+| Saved views | `GET /api/saved/{kind}` · `PUT` / `DELETE /api/saved/{kind}/{item_id}` | Per-user saved state; `kind` is `batch` or `drift_config` (anything else is `404`) |

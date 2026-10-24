@@ -6,12 +6,6 @@ interface DetectionPanelProps {
   categories: CategoryCount[]
   visible: Detection[]
   colors: Record<string, string>
-  minConfidence: number
-  onMinConfidenceChange: (value: number) => void
-  showBoxes: boolean
-  onToggleBoxes: (value: boolean) => void
-  showLabels: boolean
-  onToggleLabels: (value: boolean) => void
   selectedId: number | null
   onSelect: (id: number | null) => void
 }
@@ -21,12 +15,6 @@ export function DetectionPanel({
   categories,
   visible,
   colors,
-  minConfidence,
-  onMinConfidenceChange,
-  showBoxes,
-  onToggleBoxes,
-  showLabels,
-  onToggleLabels,
   selectedId,
   onSelect,
 }: DetectionPanelProps) {
@@ -40,46 +28,6 @@ export function DetectionPanel({
           {visible.length} shown
           {hidden > 0 && ` · ${hidden} filtered`}
         </span>
-      </div>
-
-      <div className="controls">
-        <label className="switch">
-          <input
-            type="checkbox"
-            checked={showBoxes}
-            onChange={(e) => onToggleBoxes(e.target.checked)}
-          />
-          <span>Bounding boxes</span>
-        </label>
-
-        <label className="switch">
-          <input
-            type="checkbox"
-            checked={showLabels}
-            disabled={!showBoxes}
-            onChange={(e) => onToggleLabels(e.target.checked)}
-          />
-          <span
-            title="Off by default: on a dense shelf, dozens of labels obscure the image. Hover, focus or click a box to read its label."
-          >
-            All labels
-          </span>
-        </label>
-
-        <label className="slider">
-          <span>
-            Min confidence: <strong>{Math.round(minConfidence * 100)}%</strong>
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={5}
-            value={Math.round(minConfidence * 100)}
-            onChange={(e) => onMinConfidenceChange(Number(e.target.value) / 100)}
-            aria-label="Minimum confidence filter"
-          />
-        </label>
       </div>
 
       {categories.length > 0 && (

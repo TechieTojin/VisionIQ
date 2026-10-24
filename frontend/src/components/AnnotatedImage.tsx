@@ -13,6 +13,19 @@ interface AnnotatedImageProps {
   showLabels: boolean
   selectedId: number | null
   onSelect: (id: number | null) => void
+  /**
+   * Layers drawn inside the SVG beneath the boxes (heatmap, zones). Because
+   * they share the viewBox they use original-image coordinates and stay
+   * aligned at every size with no measurement code.
+   */
+  underlay?: React.ReactNode
+  /** Layers drawn above everything, e.g. a zone-drawing capture surface. */
+  overlay?: React.ReactNode
+  /** Detections to fade out, e.g. those outside a selected zone. */
+  dimmedIds?: ReadonlySet<number>
+  /** Fill the parent's height instead of sizing to the image (wipe view). */
+  fill?: boolean
+  alt?: string
 }
 
 /**
@@ -50,6 +63,11 @@ export function AnnotatedImage({
   showLabels,
   selectedId,
   onSelect,
+  underlay,
+  overlay,
+  dimmedIds,
+  fill = false,
+  alt = 'Analyzed shelf',
 }: AnnotatedImageProps) {
   const [hoveredId, setHoveredId] = useState<number | null>(null)
   const [focusedIndex, setFocusedIndex] = useState(0)
@@ -131,10 +149,13 @@ export function AnnotatedImage({
     [ordered.length, focusBox, onSelect, selectedId],
   )
 
-  if (!showBoxes || imageWidth <= 0 || imageHeight <= 0) {
+  const containerClass = `annotated${fill ? ' annotated--fill' : ''}`
+  const hasLayers = Boolean(underlay || overlay)
+
+  if (imageWidth <= 0 || imageHeight <= 0 || (!showBoxes && !hasLayers)) {
     return (
-      <div className="annotated">
-        <img src={src} alt="Analyzed shelf" className="annotated__img" />
+      <div className={containerClass}>
+        <img src={src} alt={alt} className="annotated__img" />
       </div>
     )
   }
@@ -180,8 +201,8 @@ export function AnnotatedImage({
   const activeDetection = ordered.find((d) => d.id === activeId) ?? null
 
   return (
-    <div className="annotated">
-      <img src={src} alt="Analyzed shelf" className="annotated__img" />
+    <div className={containerClass}>
+      <img src={src} alt={alt} className="annotated__img" />
 
       <svg
         ref={svgRef}
@@ -192,12 +213,15 @@ export function AnnotatedImage({
         aria-label={`${detections.length} detected objects`}
         onMouseLeave={() => setHoveredId(null)}
       >
+        {underlay}
+
         {/* Pass 1 — boxes only. */}
-        {ordered.map((det, index) => {
+        {showBoxes && ordered.map((det, index) => {
           const color = colorFor(colors, det.label)
           const isSelected = selectedId === det.id
           const isActive = activeId === det.id
-          const dimmed = selectedId !== null && !isSelected
+          const dimmed =
+            (selectedId !== null && !isSelected) || (dimmedIds?.has(det.id) ?? false)
 
           return (
             <g
@@ -244,13 +268,16 @@ export function AnnotatedImage({
         })}
 
         {/* Pass 2 — labels, always above every box. */}
-        {showLabels &&
+        {showBoxes &&
+          showLabels &&
           ordered
             .filter((det) => det.id !== activeId)
             .map((det) => renderLabel(det, false))}
 
         {/* The active label renders last so it is never occluded. */}
-        {activeDetection && renderLabel(activeDetection, true)}
+        {showBoxes && activeDetection && renderLabel(activeDetection, true)}
+
+        {overlay}
       </svg>
     </div>
   )

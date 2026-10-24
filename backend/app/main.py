@@ -10,7 +10,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.observability import CorrelationMiddleware, configure_logging
-from app.routes import analyses, cloud, images
+from app.routes import analyses, cloud, images, workbench
+from app.workbench.common import WorkbenchError
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ app.add_middleware(CorrelationMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_settings.cors_origins,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     # Authorization carries the bearer token. There is deliberately no
     # header through which a client can assert an owner identity.
     allow_headers=["Content-Type", "X-Correlation-Id", "Authorization"],
@@ -103,6 +104,13 @@ _DEFAULT_ERROR_CODES = {
 app.include_router(images.router)
 app.include_router(analyses.router)
 app.include_router(cloud.router)
+app.include_router(workbench.router)
+
+
+@app.exception_handler(WorkbenchError)
+async def workbench_exception_handler(request: Request, exc: WorkbenchError):
+    """Workbench services raise domain errors; emit the standard envelope."""
+    return workbench.workbench_error_response(exc)
 
 
 @app.get("/")

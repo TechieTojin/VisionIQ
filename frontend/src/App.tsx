@@ -1,41 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AnnotatedImage } from './components/AnnotatedImage'
-import { DetectionPanel } from './components/DetectionPanel'
-import { Dropzone } from './components/Dropzone'
-import { HistoryPanel } from './components/HistoryPanel'
-import { InsightsPanel } from './components/InsightsPanel'
-import { MetadataPanel } from './components/MetadataPanel'
-import {
-  ApiError,
-  compareAnalyses,
-  deleteAnalysis,
-  getAnalysis,
-  getSystemStatus,
-  listAnalyses,
-  validateFile,
-} from './api/client'
-import { getAnalysisClient, type AnalysisProgress } from './api/analysisClient'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { getSystemStatus } from './api/client'
 import { resolveApiConfig } from './api/config'
-import { DemoAnalysisClient } from './demo/demoClient'
-import {
-  DEMO_MODEL,
-  DEMO_SAMPLES,
-  demoHistory,
-  type DemoSample,
-} from './demo/demoData'
-import { DemoBanner, SamplePicker } from './components/DemoPanel'
-import type {
-  AnalysisRecord,
-  AnalysisSummary,
-  ComparisonResult,
-  SystemStatus,
-} from './types'
-import { buildColorMap } from './utils/colors'
+import { ScanDataProvider } from './data/ScanDataProvider'
+// Registers the demo analysis client with the API layer (side effect).
+import './demo/demoClient'
+import { ROUTE_GROUPS, ROUTES, href, useRoute, type RouteGroup, type RouteName } from './lib/router'
+import { AnalyzePage } from './pages/AnalyzePage'
+import { DashboardPage } from './pages/DashboardPage'
+import { TimelinePage } from './pages/TimelinePage'
+import { LoadingBlock } from './components/ui/States'
+import type { SystemStatus } from './types'
+
+// Less-used screens load on demand, keeping the first download small.
+const AlertsPage = lazy(() => import('./pages/AlertsPage').then((m) => ({ default: m.AlertsPage })))
+const AnnotatePage = lazy(() => import('./pages/AnnotatePage').then((m) => ({ default: m.AnnotatePage })))
+const AskPage = lazy(() => import('./pages/AskPage').then((m) => ({ default: m.AskPage })))
+const BatchPage = lazy(() => import('./pages/BatchPage').then((m) => ({ default: m.BatchPage })))
+const BenchmarkPage = lazy(() => import('./pages/BenchmarkPage').then((m) => ({ default: m.BenchmarkPage })))
+const ComparePage = lazy(() => import('./pages/ComparePage').then((m) => ({ default: m.ComparePage })))
+const DatasetsPage = lazy(() => import('./pages/DatasetsPage').then((m) => ({ default: m.DatasetsPage })))
+const DriftPage = lazy(() => import('./pages/DriftPage').then((m) => ({ default: m.DriftPage })))
+const EvaluationPage = lazy(() => import('./pages/EvaluationPage').then((m) => ({ default: m.EvaluationPage })))
+const QualityPage = lazy(() => import('./pages/QualityPage').then((m) => ({ default: m.QualityPage })))
+const ReportsPage = lazy(() => import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage })))
+const TrainingPage = lazy(() => import('./pages/TrainingPage').then((m) => ({ default: m.TrainingPage })))
 import './App.css'
-
-type Status = 'idle' | 'uploading' | 'done' | 'error'
-
-const PAGE_SIZE = 10
+import './shell.css'
+import './workbench.css'
 
 interface DashboardProps {
   user?: { subject: string; email: string | null } | null
@@ -43,50 +34,58 @@ interface DashboardProps {
   onLogout?: () => void
 }
 
+const NAV_ICONS: Record<RouteName, string> = {
+  dashboard: '◫',
+  analyze: '◎',
+  batch: '▦',
+  compare: '⇄',
+  timeline: '☰',
+  alerts: '⚑',
+  reports: '▤',
+  ask: '?',
+  annotate: '⬚',
+  datasets: '▥',
+  quality: '◐',
+  benchmark: '⏱',
+  evaluation: '⚖',
+  drift: '∿',
+  training: '⚙',
+}
+
+/** Shown in the phone bottom bar; everything else lives under "More". */
+const PRIMARY_MOBILE: RouteName[] = ['dashboard', 'analyze', 'timeline', 'ask']
+const GROUP_KEY = 'visioniq.nav.collapsed.v1'
+
+function loadCollapsed(): RouteGroup[] {
+  try {
+    const raw: unknown = JSON.parse(window.localStorage.getItem(GROUP_KEY) ?? '[]')
+    return Array.isArray(raw) ? raw.filter((g): g is RouteGroup => ['intel', 'cv', 'ml'].includes(g)) : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The application shell: navigation, system status and account, around
+ * whichever page the hash route selects. All pages share one
+ * ScanDataProvider, so scan history is fetched once per session.
+ */
 function App({ user, mode, onLogout }: DashboardProps = {}) {
-  // Demo mode replays recorded analyses; there is no backend to call.
   const apiConfig = useMemo(() => resolveApiConfig(), [])
   const isDemo = apiConfig.mode === 'demo'
-  const demoClient = useMemo(() => new DemoAnalysisClient(), [])
-  const [status, setStatus] = useState<Status>('idle')
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [progress, setProgress] = useState(0)
-  const [stage, setStage] = useState<AnalysisProgress['stage']>('uploading')
-  const [record, setRecord] = useState<AnalysisRecord | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const route = useRoute()
   const [system, setSystem] = useState<SystemStatus | null>(null)
-
-  // Detection view controls
-  const [showBoxes, setShowBoxes] = useState(true)
-  // Labels off by default: a dense shelf yields dozens of them, and drawing
-  // every one at once hides the image they annotate.
-  const [showLabels, setShowLabels] = useState(false)
-  const [minConfidence, setMinConfidence] = useState(0)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-
-  // History
-  const [history, setHistory] = useState<AnalysisSummary[]>([])
-  const [historyLoading, setHistoryLoading] = useState(false)
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [hasMore, setHasMore] = useState(false)
-  const [search, setSearch] = useState('')
-  const [compareIds, setCompareIds] = useState<string[]>([])
-  const [comparison, setComparison] = useState<ComparisonResult | null>(null)
-
-  const previewRef = useRef<string | null>(null)
-
-  // Revoke the previous object URL whenever it is replaced or unmounted.
-  const setPreview = useCallback((url: string | null) => {
-    if (previewRef.current) URL.revokeObjectURL(previewRef.current)
-    previewRef.current = url
-    setPreviewUrl(url)
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+  const [collapsed, setCollapsed] = useState<RouteGroup[]>(() => loadCollapsed())
+  const [moreOpen, setMoreOpen] = useState(false)
+  const toggleGroup = (g: RouteGroup) => {
+    const next = collapsed.includes(g) ? collapsed.filter((x) => x !== g) : [...collapsed, g]
+    setCollapsed(next)
+    try {
+      window.localStorage.setItem(GROUP_KEY, JSON.stringify(next))
+    } catch {
+      // Not persisted; the toggle still works for this visit.
     }
-  }, [])
+  }
 
   useEffect(() => {
     // Demo mode has no backend to ask; the banner states the model instead.
@@ -96,483 +95,201 @@ function App({ user, mode, onLogout }: DashboardProps = {}) {
       .catch(() => setSystem(null))
   }, [isDemo])
 
-  // -- history -----------------------------------------------------------
-
-  const loadHistory = useCallback(
-    async (opts: { reset?: boolean; term?: string } = {}) => {
-      const term = opts.term ?? search
-
-      if (isDemo) {
-        // No backend to query: the "history" is the bundled samples.
-        const rows = demoHistory().filter((row) =>
-          term ? row.filename.toLowerCase().includes(term.toLowerCase()) : true,
-        )
-        setHistory(rows)
-        setCursor(null)
-        setHasMore(false)
-        return
-      }
-
-      setHistoryLoading(true)
-      try {
-        const page = await listAnalyses({
-          limit: PAGE_SIZE,
-          cursor: opts.reset ? undefined : (cursor ?? undefined),
-          search: term || undefined,
-        })
-        setHistory((prev) => (opts.reset ? page.items : [...prev, ...page.items]))
-        setCursor(page.next_cursor)
-        setHasMore(page.has_more)
-      } catch {
-        // History is secondary; a failure here must not break the workspace.
-      } finally {
-        setHistoryLoading(false)
-      }
-    },
-    [cursor, search, isDemo],
-  )
-
-  // Loads the first page on mount and re-queries as the search term changes.
-  // The debounce timer also keeps state updates out of the effect body.
+  // Move focus to the page region on in-app navigation, for screen readers.
+  // Not on the first render: on page load the keyboard user must start at
+  // the top (skip link, navigation), not inside the content.
+  // Compared by route key (not a "first run" flag) so React StrictMode's
+  // double-invoked effects in development behave like production.
+  const routeKey = `${route.name}/${route.id ?? ''}`
+  const lastRouteKey = useRef(routeKey)
   useEffect(() => {
-    const id = setTimeout(
-      () => {
-        setCursor(null)
-        void loadHistory({ reset: true, term: search })
-      },
-      search ? 300 : 0,
-    )
-    return () => clearTimeout(id)
-    // loadHistory changes identity with the cursor; re-running on that would
-    // re-query on every page load, so the search term is the only trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search])
+    if (lastRouteKey.current === routeKey) return
+    lastRouteKey.current = routeKey
+    document.getElementById('main')?.focus({ preventScroll: true })
+    window.scrollTo?.({ top: 0 })
+  }, [routeKey])
 
-  // -- analysis ----------------------------------------------------------
+  // Navigating from the mobile sheet closes it.
+  const [lastRoute, setLastRoute] = useState(route.name)
+  if (lastRoute !== route.name) {
+    setLastRoute(route.name)
+    setMoreOpen(false)
+  }
 
-  const reset = useCallback(() => {
-    setStatus('idle')
-    setProgress(0)
-    setRecord(null)
-    setError(null)
-    setSelectedId(null)
-    setPreview(null)
-  }, [setPreview])
-
-  const handleFile = useCallback(
-    async (file: File) => {
-      const clientError = validateFile(file)
-      setPreview(URL.createObjectURL(file))
-      setRecord(null)
-      setSelectedId(null)
-
-      if (clientError) {
-        setError(clientError)
-        setStatus('error')
-        return
-      }
-
-      setError(null)
-      setProgress(0)
-      setStage('uploading')
-      setStatus('uploading')
-
-      try {
-        // One call in local mode; presign -> S3 -> job -> poll in cloud mode.
-        const result = await getAnalysisClient().analyze(file, (p) => {
-          if (p.percent !== undefined) setProgress(p.percent)
-          setStage(p.stage)
-        })
-        setRecord(result)
-        setStatus('done')
-        setCursor(null)
-        void loadHistory({ reset: true })
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'Unexpected error.')
-        setStatus('error')
-      }
-    },
-    [loadHistory, setPreview],
-  )
-
-  const handleDemoPick = useCallback(
-    async (sample: DemoSample) => {
-      setError(null)
-      setProgress(100)
-      setStage('processing')
-      setStatus('uploading')
-      setSelectedId(null)
-      // The sample's own image, served statically - not an object URL.
-      setPreview(sample.image_url)
-      try {
-        const result = await demoClient.replay(sample.id, (p) => {
-          if (p.percent !== undefined) setProgress(p.percent)
-          setStage(p.stage)
-        })
-        setRecord(result)
-        setStatus('done')
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'Could not load sample.')
-        setStatus('error')
-      }
-    },
-    [demoClient, setPreview],
-  )
-
-  const openAnalysis = useCallback(
-    async (id: string) => {
-      if (isDemo) {
-        const sample = DEMO_SAMPLES.find((x) => x.record.analysis_id === id)
-        if (sample) {
-          setRecord(sample.record)
-          setPreview(sample.image_url)
-          setStatus('done')
-          setError(null)
-          setSelectedId(null)
-        }
-        return
-      }
-      try {
-        const full = await getAnalysis(id)
-        setRecord(full)
-        setStatus('done')
-        setError(null)
-        setSelectedId(null)
-        // Historical records have no local object URL for the image.
-        setPreview(null)
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'Could not load analysis.')
-        setStatus('error')
-      }
-    },
-    [setPreview, isDemo],
-  )
-
-  const removeAnalysis = useCallback(
-    async (id: string) => {
-      try {
-        await deleteAnalysis(id)
-        setHistory((prev) => prev.filter((h) => h.analysis_id !== id))
-        setCompareIds((prev) => prev.filter((c) => c !== id))
-        if (record?.analysis_id === id) reset()
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'Could not delete.')
-      }
-    },
-    [record, reset],
-  )
-
-  const toggleCompare = useCallback((id: string) => {
-    setCompareIds((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((p) => p !== id)
-        : [...prev, id].slice(-2)
-      // Clear a stale comparison here rather than in an effect, so the
-      // selection and its result always change together.
-      if (next.length !== 2) setComparison(null)
-      return next
-    })
-  }, [])
-
-  // Fetch a comparison once exactly two scans are selected.
-  useEffect(() => {
-    if (compareIds.length !== 2) return
-    // No backend in demo mode, and the compare controls are hidden there.
-    if (isDemo) return
-    let cancelled = false
-    compareAnalyses(compareIds[0], compareIds[1])
-      .then((res) => {
-        if (!cancelled) setComparison(res)
-      })
-      .catch(() => {
-        if (!cancelled) setComparison(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [compareIds, isDemo])
-
-  // -- derived -----------------------------------------------------------
-
-  const visibleDetections = useMemo(() => {
-    if (!record?.detection) return []
-    return record.detection.detections.filter(
-      (d) => d.confidence >= minConfidence,
-    )
-  }, [record, minConfidence])
-
-  const visibleCategories = useMemo(() => {
-    if (!record?.retail) return []
-    const allowed = new Set(visibleDetections.map((d) => d.label))
-    return record.retail.categories.filter((c) => allowed.has(c.label))
-  }, [record, visibleDetections])
-
-  // Colours are assigned by category rank, so the categories present in this
-  // analysis are always visually distinct.
-  const colors = useMemo(
-    () => buildColorMap((record?.retail?.categories ?? []).map((c) => c.label)),
-    [record],
-  )
-
-  const detection = record?.detection ?? null
-  const modelUnavailable = detection?.status === 'unavailable'
+  const paramKey = route.params.toString()
+  let page: React.ReactNode
+  switch (route.name) {
+    case 'analyze':
+      page = <AnalyzePage scanId={route.id} />
+      break
+    case 'compare':
+      page = <ComparePage params={route.params} />
+      break
+    case 'timeline':
+      // Keyed by the query so a dashboard link re-seeds the filters.
+      page = <TimelinePage key={paramKey} params={route.params} />
+      break
+    case 'reports':
+      page = <ReportsPage params={route.params} />
+      break
+    case 'batch':
+      page = <BatchPage />
+      break
+    case 'alerts':
+      page = <AlertsPage />
+      break
+    case 'ask':
+      page = <AskPage />
+      break
+    case 'annotate':
+      page = <AnnotatePage scanId={route.id} />
+      break
+    case 'datasets':
+      page = <DatasetsPage datasetId={route.id} />
+      break
+    case 'quality':
+      page = <QualityPage />
+      break
+    case 'benchmark':
+      page = <BenchmarkPage runId={route.id} />
+      break
+    case 'evaluation':
+      page = <EvaluationPage key={paramKey} runId={route.id} params={route.params} />
+      break
+    case 'drift':
+      page = <DriftPage />
+      break
+    case 'training':
+      page = <TrainingPage runId={route.id} />
+      break
+    default:
+      page = <DashboardPage params={route.params} />
+  }
 
   return (
-    <div className="app">
-      <header className="app__header">
-        <div className="brand">
-          <span className="brand__mark">◆</span>
-          <div>
-            <h1>VisionIQ</h1>
-            <p>Retail Shelf Intelligence</p>
-          </div>
-        </div>
-        <div className="statusbar">
-          {system && (
-            <>
+    <ScanDataProvider>
+      <div className="shell">
+        <a className="skip-link" href="#main">
+          Skip to content
+        </a>
+        <aside className="sidebar">
+          <a className="brand" href={href('dashboard')}>
+            <span className="brand__mark" aria-hidden="true">
+              ◆
+            </span>
+            <span className="brand__text">
+              <span className="brand__name">VisionIQ</span>
+              <span className="brand__tag">Retail Shelf Intelligence</span>
+            </span>
+          </a>
+          <nav className={`nav${moreOpen ? ' is-open' : ''}`} aria-label="Main" id="main-nav">
+            {ROUTE_GROUPS.map((g) => {
+              const isCollapsed = collapsed.includes(g.id) && !ROUTES.some((r) => r.group === g.id && r.name === route.name)
+              const groupId = `nav-group-${g.id}`
+              return (
+                <div key={g.id} className="nav__group">
+                  <button
+                    type="button"
+                    className="nav__group-toggle"
+                    aria-expanded={!isCollapsed}
+                    aria-controls={groupId}
+                    onClick={() => toggleGroup(g.id)}
+                  >
+                    <span>{g.label}</span>
+                    <span className="nav__chev" aria-hidden="true">
+                      {isCollapsed ? '▸' : '▾'}
+                    </span>
+                  </button>
+                  <div id={groupId} className="nav__items" hidden={isCollapsed}>
+                    {ROUTES.filter((r) => r.group === g.id).map((r) => (
+                      <a
+                        key={r.name}
+                        className={`nav__link${route.name === r.name ? ' is-active' : ''}`}
+                        href={href(r.name)}
+                        aria-current={route.name === r.name ? 'page' : undefined}
+                        title={r.description}
+                      >
+                        <span className="nav__icon" aria-hidden="true">
+                          {NAV_ICONS[r.name]}
+                        </span>
+                        <span className="nav__label">{r.label}</span>
+                        {r.localOnly && isDemo && <span className="nav__tag">local</span>}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </nav>
+          <nav className="mobile-bar" aria-label="Quick navigation">
+            {PRIMARY_MOBILE.map((name) => {
+              const r = ROUTES.find((x) => x.name === name)!
+              return (
+                <a
+                  key={name}
+                  className={`mobile-bar__link${route.name === name ? ' is-active' : ''}`}
+                  href={href(name)}
+                  aria-current={route.name === name ? 'page' : undefined}
+                >
+                  <span aria-hidden="true">{NAV_ICONS[name]}</span>
+                  <span>{r.label}</span>
+                </a>
+              )
+            })}
+            <button
+              type="button"
+              className={`mobile-bar__link${moreOpen || !PRIMARY_MOBILE.includes(route.name) ? ' is-active' : ''}`}
+              aria-expanded={moreOpen}
+              aria-controls="main-nav"
+              onClick={() => setMoreOpen((v) => !v)}
+            >
+              <span aria-hidden="true">⋯</span>
+              <span>More</span>
+            </button>
+          </nav>
+          <div className="sidebar__foot">
+            {isDemo && <span className="pill pill--accent">demo · recorded results</span>}
+            {system && (
               <span
                 className={`pill ${system.model_available ? 'pill--ok' : 'pill--warn'}`}
                 title={system.model_unavailable_reason ?? 'Model loaded'}
               >
-                {system.model_available
-                  ? `${system.model.name}`
-                  : 'model unavailable'}
+                {system.model_available ? system.model.name : 'model unavailable'}
               </span>
-              <span className="pill">{system.execution_mode}</span>
-            </>
-          )}
-          {mode === 'cognito' && onLogout && (
-            <div className="account">
-              <span className="account__name" title={user?.subject ?? ''}>
-                {user?.email ?? user?.subject ?? 'Signed in'}
+            )}
+            {system && <span className="pill">{system.execution_mode}</span>}
+            {mode === 'local' && (
+              <span
+                className="pill pill--warn"
+                title="VITE_AUTH_MODE=local — no authentication. Never used in a production build."
+              >
+                auth off (local)
               </span>
-              <button type="button" className="chip" onClick={onLogout}>
-                Sign out
-              </button>
-            </div>
-          )}
-          {mode === 'local' && (
-            <span
-              className="pill pill--warn"
-              title="VITE_AUTH_MODE=local — no authentication. Never used in a production build."
-            >
-              auth off (local)
-            </span>
-          )}
-        </div>
-      </header>
-
-      {system && !system.model_available && (
-        <p className="notice notice--warn notice--wide">
-          <strong>No detection model is loaded.</strong>{' '}
-          {system.model_unavailable_reason} Images will still be validated, but
-          no objects can be detected.
-        </p>
-      )}
-
-      {isDemo && <DemoBanner modelName={DEMO_MODEL?.name} />}
-
-      <main className="layout">
-        {/* ---- Workspace ---- */}
-        <section className="column column--main">
-          {isDemo ? (
-            <SamplePicker
-              activeId={record?.analysis_id ?? null}
-              busy={status === 'uploading'}
-              onPick={handleDemoPick}
-            />
-          ) : (
-            <Dropzone
-              disabled={status === 'uploading'}
-              onFileSelected={handleFile}
-            />
-          )}
-
-          {status === 'uploading' && (
-            <div className="panel">
-              <div className="progress" aria-label="Analysis progress">
-                <div
-                  className="progress__bar"
-                  style={{ width: `${Math.max(progress, 8)}%` }}
-                />
-                <span className="progress__label">
-                  {stage === 'uploading' && progress < 100
-                    ? `Uploading… ${progress}%`
-                    : stage === 'queued'
-                      ? 'Queued for analysis…'
-                      : 'Running detection…'}
+            )}
+            {mode === 'cognito' && onLogout && (
+              <div className="account">
+                <span className="account__name" title={user?.subject ?? ''}>
+                  {user?.email ?? user?.subject ?? 'Signed in'}
                 </span>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={onLogout}>
+                  Sign out
+                </button>
               </div>
-            </div>
+            )}
+          </div>
+        </aside>
+
+        <main id="main" className="main" tabIndex={-1}>
+          {system && !system.model_available && (
+            <p className="callout callout--warn" role="note">
+              <strong>No detection model is loaded.</strong> {system.model_unavailable_reason} Images will
+              still be validated, but no objects can be detected.
+            </p>
           )}
-
-          {status === 'error' && error && (
-            <div className="panel state state--error">
-              <span className="badge badge--error">Error</span>
-              <h2>Could not analyze image</h2>
-              <p>{error}</p>
-              <button className="btn" type="button" onClick={reset}>
-                Try another image
-              </button>
-            </div>
-          )}
-
-          {record && detection && (
-            <>
-              {previewUrl ? (
-                <div className="panel">
-                  <div className="panel__header">
-                    <h2>Annotated image</h2>
-                    <button className="link-btn" onClick={reset} type="button">
-                      Clear
-                    </button>
-                  </div>
-                  <AnnotatedImage
-                    src={previewUrl}
-                    imageWidth={detection.image_width}
-                    imageHeight={detection.image_height}
-                    detections={visibleDetections}
-                    colors={colors}
-                    showBoxes={showBoxes}
-                    showLabels={showLabels}
-                    selectedId={selectedId}
-                    onSelect={setSelectedId}
-                  />
-                </div>
-              ) : (
-                <div className="panel state state--empty">
-                  <h2>Image preview unavailable</h2>
-                  <p>
-                    This analysis was loaded from history. The original image is
-                    not held in the browser, so boxes cannot be overlaid — the
-                    detection data below is complete.
-                  </p>
-                </div>
-              )}
-
-              {detection.warnings.length > 0 && (
-                <div className="panel notice-panel">
-                  <h3 className="subhead">Model notes</h3>
-                  <ul className="bullets">
-                    {detection.warnings.map((w, i) => (
-                      <li key={i}>{w}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {modelUnavailable ? (
-                <div className="panel state state--empty">
-                  <span className="badge badge--warn">No inference</span>
-                  <h2>Detection did not run</h2>
-                  <p>
-                    The image was validated successfully, but no detection model
-                    was available. No objects were analysed — this does not mean
-                    the shelf is empty.
-                  </p>
-                </div>
-              ) : (
-                <DetectionPanel
-                  detection={detection}
-                  categories={visibleCategories}
-                  visible={visibleDetections}
-                  colors={colors}
-                  minConfidence={minConfidence}
-                  onMinConfidenceChange={setMinConfidence}
-                  showBoxes={showBoxes}
-                  onToggleBoxes={setShowBoxes}
-                  showLabels={showLabels}
-                  onToggleLabels={setShowLabels}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                />
-              )}
-            </>
-          )}
-
-          {status === 'idle' && !record && (
-            <div className="panel state state--empty">
-              <div className="state__icon" aria-hidden="true">
-                ☷
-              </div>
-              <h2>No analysis yet</h2>
-              <p>
-                Upload a shelf image to detect objects, view bounding boxes and
-                confidence scores, and build a scan history.
-              </p>
-            </div>
-          )}
-        </section>
-
-        {/* ---- Side rail ---- */}
-        <section className="column column--side">
-          {record?.insights && record.retail && (
-            <InsightsPanel insights={record.insights} retail={record.retail} />
-          )}
-
-          {record && (
-            <>
-              <MetadataPanel metadata={record.image} />
-              {detection && (
-                <div className="panel">
-                  <div className="panel__header">
-                    <h2>Model</h2>
-                  </div>
-                  <dl className="facts">
-                    <div>
-                      <dt>Name</dt>
-                      <dd>{detection.model.name}</dd>
-                    </div>
-                    <div>
-                      <dt>Provider</dt>
-                      <dd>{detection.model.provider}</dd>
-                    </div>
-                    <div>
-                      <dt>Taxonomy</dt>
-                      <dd>{detection.model.taxonomy}</dd>
-                    </div>
-                    <div>
-                      <dt>Device</dt>
-                      <dd>{detection.model.device}</dd>
-                    </div>
-                    <div>
-                      <dt>Inference</dt>
-                      <dd>{Math.round(detection.processing_ms)} ms</dd>
-                    </div>
-                    <div>
-                      <dt>Threshold</dt>
-                      <dd>
-                        {Math.round(detection.confidence_threshold * 100)}%
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-              )}
-            </>
-          )}
-
-          <HistoryPanel
-            items={history}
-            loading={historyLoading}
-            search={search}
-            onSearchChange={setSearch}
-            activeId={record?.analysis_id ?? null}
-            compareIds={compareIds}
-            comparison={comparison}
-            hasMore={hasMore}
-            readOnly={isDemo}
-            onSelect={openAnalysis}
-            onDelete={removeAnalysis}
-            onToggleCompare={toggleCompare}
-            onLoadMore={() => void loadHistory()}
-            onClearComparison={() => {
-              setCompareIds([])
-              setComparison(null)
-            }}
-          />
-        </section>
-      </main>
-    </div>
+          <Suspense fallback={<LoadingBlock rows={6} label="Loading page…" />}>{page}</Suspense>
+        </main>
+      </div>
+    </ScanDataProvider>
   )
 }
 

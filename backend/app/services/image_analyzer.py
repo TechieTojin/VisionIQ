@@ -75,6 +75,19 @@ def analyze_image(filename: str, data: bytes) -> ImageMetadata:
             f"Supported formats: {supported}.",
         )
 
+    # verify() checks structure but not that the pixel data is complete: a
+    # truncated JPEG passes it and only fails when decoded. Decode fully here
+    # (after the pixel-count guard above) so a corrupt upload is a clean 400
+    # instead of a failure later in inference or quality inspection.
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.load()
+    except (OSError, ValueError):
+        raise ImageValidationError(
+            "invalid_image",
+            "The image file is truncated or corrupt and could not be decoded.",
+        )
+
     aspect_ratio = round(width / height, 4) if height else 0.0
     megapixels = round((width * height) / 1_000_000, 2)
 

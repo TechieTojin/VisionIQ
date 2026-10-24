@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
+from app.config import ALLOWED_FORMATS
 from app.repositories import get_repository
 from app.repositories.base import AnalysisNotFound, RepositoryError
 from app.schemas.analysis import AnalysisPage, AnalysisRecord, JobStatus
@@ -61,6 +62,106 @@ def get_analysis(
     except AnalysisNotFound as exc:
         raise _not_found(analysis_id) from exc
     return JSONResponse(status_code=200, content=record.model_dump(mode="json"))
+
+
+# Image types this endpoint will ever label a response with. The stored
+# content type was derived from decoded pixels at upload time, but it is still
+# checked against the allow-list rather than echoed blindly.
+_SERVABLE_TYPES = set(ALLOWED_FORMATS.values())
+
+
+def _image_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "success": False,
+            "error": "image_unavailable",
+            "detail": "The stored image for this analysis is no longer available.",
+        },
+    )
+
+
+@router.get(
+    "/{analysis_id}/image",
+    responses={404: {"model": ErrorResponse}},
+    response_class=Response,
+)
+def get_analysis_image(
+    analysis_id: str, owner_id: str = Depends(get_owner_id)
+) -> Response:
+    """Return the stored image for one of the caller's analyses.
+
+    Binary, not a JSON resource, so it sits outside the canonical
+    JSON-shape contract. Tenancy is enforced twice: the record lookup is
+    owner-scoped (a cross-tenant id is a 404, never a 403), and the storage
+    key is re-checked with `assert_owned` before any bytes are read.
+    """
+    try:
+        record = get_repository().get(owner_id, analysis_id)
+    except AnalysisNotFound as exc:
+        raise _not_found(analysis_id) from exc
+
+    if not record.image_key:
+        raise _image_unavailable()
+
+    from app.storage import get_storage
+    from app.storage.base import StorageError, assert_owned
+
+    try:
+        assert_owned(record.image_key, owner_id)
+        data = get_storage().get(record.image_key)
+    except StorageError as exc:
+        raise _image_unavailable() from exc
+
+    media_type = record.image.content_type
+    if media_type not in _SERVABLE_TYPES:
+        media_type = "application/octet-stream"
+
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={
+            # Per-user content: never let a shared cache keep it.
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get(
+    "/{analysis_id}/thumbnail",
+    responses={404: {"model": ErrorResponse}},
+    response_class=Response,
+)
+def get_analysis_thumbnail(
+    analysis_id: str,
+    size: int = Query(256, ge=64, le=512),
+    owner_id: str = Depends(get_owner_id),
+) -> Response:
+    """A small JPEG preview of the stored image, for grids and lists.
+
+    Same tenancy checks as `/image`. Keeps browser memory low when a page
+    shows dozens of scans.
+    """
+    import io
+
+    from PIL import Image
+
+    original = get_analysis_image(analysis_id, owner_id)
+    try:
+        with Image.open(io.BytesIO(original.body)) as img:
+            img.draft("RGB", (size, size))
+            img = img.convert("RGB")
+            img.thumbnail((size, size))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=80)
+    except OSError as exc:
+        raise _image_unavailable() from exc
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.delete("/{analysis_id}", status_code=204, responses={404: {"model": ErrorResponse}})

@@ -138,6 +138,22 @@ class Settings:
         self.jobs_queue_url: str = os.getenv("VISIONIQ_JOBS_QUEUE_URL", "")
         self.cloud_mode: bool = _env_bool("VISIONIQ_CLOUD_MODE", False)
 
+        # -- Workbench (local ML engineering features) --------------------
+        # Annotations, datasets, alerts, benchmark/evaluation/training runs.
+        # Local SQLite only: these features are not part of the cloud API.
+        self.workbench_db_path: Path = Path(
+            os.getenv("VISIONIQ_WORKBENCH_DB", str(BACKEND_ROOT / "data" / "workbench.db"))
+        )
+        # Dataset blobs, exports and training runs live under this root.
+        self.workbench_dir: Path = Path(
+            os.getenv("VISIONIQ_WORKBENCH_DIR", str(BACKEND_ROOT / "data" / "workbench"))
+        )
+        # Module executed (with `python -m`) for training. Environment only —
+        # never selectable through the API.
+        self.train_worker_module: str = os.getenv(
+            "VISIONIQ_TRAIN_WORKER_MODULE", "app.workbench.train_worker"
+        )
+
         # -- Misc ---------------------------------------------------------
         self.log_level: str = os.getenv("VISIONIQ_LOG_LEVEL", "INFO")
         self.rate_limit_per_minute: int = _env_int("VISIONIQ_RATE_LIMIT", 60)

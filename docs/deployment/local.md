@@ -469,6 +469,17 @@ errors are logged but **never** echoed to the caller.
 | `VISIONIQ_JOBS_QUEUE_URL` | `""` | SQS queue. Empty → `enqueue()` raises `JobError`; the worker exits 1. |
 | `VISIONIQ_CLOUD_MODE` | `false` | Truthy: `1`, `true`, `yes`, `on`. Reports `execution_mode: "cloud"`. It **no longer has anything to do with identity** — authentication is controlled solely by `VISIONIQ_AUTH_MODE`. |
 
+### Workbench (local ML-engineering features)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `VISIONIQ_WORKBENCH_DB` | `backend/data/workbench.db` | Owner-scoped SQLite document store: annotations, datasets, alerts, saved views, benchmark / evaluation / training runs. Git-ignored. |
+| `VISIONIQ_WORKBENCH_DIR` | `backend/data/workbench` | Content-addressed dataset blobs, exports and training run directories. Git-ignored. |
+| `VISIONIQ_TRAIN_WORKER_MODULE` | `app.workbench.train_worker` | Module run with `python -m` for training. Environment only — never selectable through the API. Tests point it at a fake worker. |
+
+The test suite redirects both paths to a temporary directory, so running
+`pytest` never writes to your real workbench store.
+
 ### Misc
 
 | Variable | Default | Notes |

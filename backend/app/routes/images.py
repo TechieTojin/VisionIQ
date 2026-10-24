@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.config import MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, get_settings
@@ -78,6 +78,7 @@ async def analyze(file: UploadFile = File(...)) -> JSONResponse:
     dependencies=[Depends(rate_limit)],
 )
 async def detect(
+    background: BackgroundTasks,
     file: UploadFile = File(...),
     owner_id: str = Depends(get_owner_id),
 ) -> JSONResponse:
@@ -103,7 +104,26 @@ async def detect(
         # Persistence failure shouldn't lose the user's result; report it.
         logger.error("analysis_persist_failed", extra={"error": str(exc)})
         record.error = (record.error or "") + " (result was not saved to history)"
+    else:
+        # Local workbench: image quality and alert evaluation, after the
+        # response is sent so they never delay or change it.
+        if (settings.repository_backend or "sqlite").lower() == "sqlite":
+            background.add_task(_post_detect, owner_id, record.analysis_id)
 
     return JSONResponse(
         status_code=200, content=record.model_dump(mode="json")
     )
+
+
+def _post_detect(owner_id: str, analysis_id: str) -> None:
+    """Best-effort quality inspection + alert evaluation for a new scan."""
+    from app.workbench import alerts, quality
+
+    try:
+        quality.get_or_compute(owner_id, analysis_id)
+    except Exception as exc:  # noqa: BLE001 - never affects the scan
+        logger.warning("post_detect_quality_failed", extra={"error": str(exc)})
+    try:
+        alerts.evaluate(owner_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("post_detect_alerts_failed", extra={"error": str(exc)})

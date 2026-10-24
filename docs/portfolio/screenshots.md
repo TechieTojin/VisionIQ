@@ -1,5 +1,11 @@
 # Screenshots checklist
 
+> **Update (October 2026):** the README now uses 20 screenshots of the full
+> 18-feature application, captured from the running app and stored as WebP in
+> [`docs/screenshots/`](../screenshots/). The checklist below predates those
+> features (and its test counts are from that earlier phase); keep it as
+> guidance for the original nine portfolio shots.
+
 Nine shots. Together they should let a reviewer understand what the project
 does, what it refuses to do, and that it actually runs — without cloning it.
 
