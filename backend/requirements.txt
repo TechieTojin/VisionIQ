@@ -8,7 +8,7 @@
 # 3.11 (CI), and are the exact versions verified by the test suite.
 fastapi==0.159.1
 uvicorn==0.54.0
-pillow==12.3.0            # 13.x requires Python >= 3.11
+pillow==13.0.0            # 13.x requires Python >= 3.11
 python-multipart==0.0.32
 pydantic==2.14.1
 # Workbench statistics (drift PSI/KS, evaluation metrics, image quality).
