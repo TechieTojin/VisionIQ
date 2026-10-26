@@ -11,4 +11,4 @@
 # Serving them over a network obliges you to release your source under a
 # compatible licence, or to obtain an Ultralytics Enterprise Licence.
 # See docs/architecture/models.md before any commercial deployment.
-ultralytics==8.4.183
+ultralytics==8.4.184
